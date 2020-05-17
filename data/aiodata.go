@@ -35,7 +35,11 @@ var cfg AioCrossConfig
 var msgLabel *widget.Label
 var portEntry *widget.Entry
 var wd string
-var ClientPort string = "1006"
+var localCfg CrossLocalConfig
+
+type CrossLocalConfig struct {
+	ClientPort string
+}
 
 type AioCrossConfig struct {
 	TrojanServers []AioCrossTrojanServer `json:"trojanServers"`
@@ -59,6 +63,36 @@ func Init() {
 		log.Println(err)
 	}
 	wd = wwd
+
+	ReloadLocalCfg()
+}
+
+func ReloadLocalCfg() {
+	cfgPath := filepath.FromSlash(path.Join(wd, "/cfg.json.txt"))
+	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
+		log.Println("ReloadLocalCfg does not exist")
+		localCfg = *new(CrossLocalConfig)
+		localCfg.ClientPort = "1006"
+		return
+	}
+	bs, err := ioutil.ReadFile(cfgPath)
+	if err != nil {
+		log.Println(err)
+	}
+	log.Println("ReloadLocalCfg res=" + string(bs))
+	jsoniter.Unmarshal(bs, &localCfg)
+}
+
+func SaveLocalCfg() {
+	cfgPath := filepath.FromSlash(path.Join(wd, "/cfg.json.txt"))
+	bs, err := jsoniter.Marshal(localCfg)
+	if err != nil {
+		log.Println(err)
+	}
+	err = ioutil.WriteFile(cfgPath, bs, 0777)
+	if err != nil {
+		log.Println(err)
+	}
 }
 
 func GetConfig() {
@@ -106,8 +140,8 @@ func StartUI() {
 	//settings
 	setForm := widget.NewForm()
 	portEntry = widget.NewEntry()
-	portEntry.SetPlaceHolder(ClientPort)
-	portEntry.SetText(ClientPort)
+	portEntry.SetPlaceHolder(localCfg.ClientPort)
+	portEntry.SetText(localCfg.ClientPort)
 	setForm.Append("Local Port", portEntry)
 	serversBox.Append(setForm)
 
@@ -160,10 +194,11 @@ func ConnectTrojan(cfg AioCrossTrojanServer) {
 	ccPath := filepath.FromSlash(path.Join(trojanCfgPath, "/client.json"))
 	exePath := filepath.FromSlash(path.Join(trojanRootPath, "/trojan.exe"))
 
-	ClientPort = portEntry.Text
-	cfg.PortClient, err = strconv.Atoi(ClientPort)
+	localCfg.ClientPort = portEntry.Text
+	cfg.PortClient, err = strconv.Atoi(localCfg.ClientPort)
 	cc := strings.ReplaceAll(string(res.Body()), "CLIENT_PORT", fmt.Sprintf("%d", cfg.PortClient))
 	cc = strings.ReplaceAll(cc, "CERT_DIR", strings.ReplaceAll(trojanCfgPath, "\\", "/") )
+	SaveLocalCfg()
 
 
 	os.MkdirAll(trojanCfgPath, 0777)
@@ -205,7 +240,7 @@ func RunTestCmd() {
 	time.Sleep(2 * time.Second)
 	//curl --socks5 127.0.0.1:1006 icanhazip.com
 	exe := filepath.FromSlash(path.Join(wd, "/libs/curl.exe"))
-	acmd := exec.Command(exe, "--socks5", "127.0.0.1:" + ClientPort, "icanhazip.com")
+	acmd := exec.Command(exe, "--socks5", "127.0.0.1:" + localCfg.ClientPort, "icanhazip.com")
 	out, err := acmd.Output()
 	if err != nil {
 		log.Println(err)
