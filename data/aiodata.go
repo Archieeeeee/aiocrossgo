@@ -7,6 +7,7 @@ import (
 	"fyne.io/fyne/widget"
 	"github.com/go-resty/resty/v2"
 	"github.com/json-iterator/go"
+	"github.com/mitchellh/go-ps"
 	"io/ioutil"
 	"log"
 	"os"
@@ -15,11 +16,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
 //const API_BASE = "http://het.b.kda.io"
-const API_BASE = "http://127.0.0.1"
+var API_BASE = "http://127.0.0.1"
 var client = resty.New()
 //const TROJAN_ROOT_PATH = "E:/tools/trojan"
 //const TROJAN_CFG_ROOT_PATH = "E:/tools/trojan/aio"
@@ -39,6 +41,8 @@ var localCfg CrossLocalConfig
 
 type CrossLocalConfig struct {
 	ClientPort string
+	ApiBase string
+	LastTrojanPid int
 }
 
 type AioCrossConfig struct {
@@ -73,6 +77,8 @@ func ReloadLocalCfg() {
 		log.Println("ReloadLocalCfg does not exist")
 		localCfg = *new(CrossLocalConfig)
 		localCfg.ClientPort = "1006"
+		localCfg.ApiBase = "http://cross.kda.io:8080"
+		API_BASE = localCfg.ApiBase
 		return
 	}
 	bs, err := ioutil.ReadFile(cfgPath)
@@ -81,6 +87,7 @@ func ReloadLocalCfg() {
 	}
 	log.Println("ReloadLocalCfg res=" + string(bs))
 	jsoniter.Unmarshal(bs, &localCfg)
+	API_BASE = localCfg.ApiBase
 }
 
 func SaveLocalCfg() {
@@ -117,7 +124,8 @@ func GetConfig() {
 }
 
 func StartUI() {
-	os.Setenv("FYNE_FONT", "d:/NotoSans-Regular.ttf");
+	os.Setenv("FYNE_FONT", "d:/NotoSans-Regular.ttf")
+	os.Setenv("FYNE_SCALE", "1.2")
 
 	a := app.New()
 
@@ -129,11 +137,10 @@ func StartUI() {
 	for idx, ss := range cfg.TrojanServers {
 		log.Println("AAidx is ", idx)
 		i := idx
-		label := widget.NewButton(fmt.Sprintf("%s-%s", ss.NameEn, ss.Host), func() {
+		label := widget.NewButton(fmt.Sprintf("%s    %s", ss.NameEn, ss.Host), func() {
 			log.Println("idx is ", i)
 			ConnectTrojan(cfg.TrojanServers[i])
 		})
-		label.Resize(fyne.NewSize(800, 50))
 		serversBox.Append(label)
 	}
 
@@ -151,7 +158,7 @@ func StartUI() {
 
 
 	w.SetContent(serversBox)
-	w.Resize(fyne.NewSize(800, 520))
+	w.Resize(fyne.NewSize(600, 400))
 	w.CenterOnScreen()
 
 
@@ -213,11 +220,16 @@ func ConnectTrojan(cfg AioCrossTrojanServer) {
 	log.Printf("start trojan=%s", cfg.Name)
 	StopCmd()
 	cmd = exec.Command(exePath, "-c", ccPath)
+	HideCmd(cmd)
 	go RunCmd()
 	go RunTestCmd()
 	//msgLabel.SetText(fmt.Sprintf("Connected to %s %s, OK!", cfg.NameEn, cfg.Name))
 	msgLabel.SetText(fmt.Sprintf("Connected to %s %s, OK!", cfg.NameEn, ""))
 	//RunCmd()
+}
+
+func HideCmd(cmdParam *exec.Cmd) {
+	cmdParam.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 }
 
 func StopCmd() {
@@ -227,7 +239,41 @@ func StopCmd() {
 		cmd.Wait()
 		time.Sleep(2 * time.Second)
 		log.Println("kill process done")
+		return
 	}
+
+	processes, err := ps.Processes()
+	if err != nil {
+		log.Println(err)
+	}
+	for _, proc := range processes {
+		if strings.Contains(proc.Executable(), "trojan") {
+			exe := "taskkill"
+
+			acmd := exec.Command(exe, "/T",  "/F", "/PID", strconv.Itoa(proc.Pid()))
+			HideCmd(acmd)
+			out, err := acmd.Output()
+			if err != nil {
+				log.Println(err)
+			}
+			acmd.Run()
+			log.Printf("taskkill res=%s", out)
+
+			time.Sleep(2 * time.Second)
+			log.Println("kill process done")
+		}
+	}
+
+	//if localCfg.LastTrojanPid == 0 {
+	//	return
+	//}
+	//proc, err := ps.FindProcess(localCfg.LastTrojanPid)
+	//if err != nil {
+	//	log.Println(err)
+	//}
+
+
+
 }
 
 func RunCmd() {
@@ -241,6 +287,7 @@ func RunTestCmd() {
 	//curl --socks5 127.0.0.1:1006 icanhazip.com
 	exe := filepath.FromSlash(path.Join(wd, "/libs/curl.exe"))
 	acmd := exec.Command(exe, "--socks5", "127.0.0.1:" + localCfg.ClientPort, "icanhazip.com")
+	HideCmd(acmd)
 	out, err := acmd.Output()
 	if err != nil {
 		log.Println(err)
