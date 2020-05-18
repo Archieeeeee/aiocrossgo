@@ -1,6 +1,4 @@
-trojan
-/libs
-/cmd/NotoSans-Regular.ttf
+/aio
 /cmd/cmd.exe
 /cmd/fyne.syso
 /cfg.json.txt
