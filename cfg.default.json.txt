@@ -1,1 +1,1 @@
-{"ClientPort":"1006","ApiBase":"http://cross.kda.io:8080"}
+{"ClientPort":"1006","ApiBase":"http://cross.kda.io:8181","LastTrojanPid":0,"UseTrojan":true,"ClientPortHttp":"8888","EnableSocksToHttp":false}

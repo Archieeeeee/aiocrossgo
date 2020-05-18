@@ -35,10 +35,12 @@ const TROJAN_CFG_ROOT_PATH = "/aio"
 //const TROJAN_ROOT_PATH = "/trojan"
 //const TROJAN_CFG_ROOT_PATH = "/trojan/aio"
 
-var cmd *exec.Cmd
+var proxyCmd *exec.Cmd
 var cfg AioCrossConfig
 var msgLabel *widget.Label
 var portEntry *widget.Entry
+var portHttpEntry *widget.Entry
+var enableHttpEntry *widget.Check
 var wd string
 var localCfg CrossLocalConfig
 
@@ -47,6 +49,8 @@ type CrossLocalConfig struct {
 	ApiBase string
 	LastTrojanPid int
 	UseTrojan bool
+	ClientPortHttp string
+	EnableSocksToHttp bool
 }
 
 type AioCrossConfig struct {
@@ -87,6 +91,9 @@ func ReloadLocalCfg() {
 		localCfg.ClientPort = "1006"
 		localCfg.ApiBase = "http://cross.kda.io:8080"
 		API_BASE = localCfg.ApiBase
+		localCfg.UseTrojan = true
+		localCfg.ClientPortHttp = "8888"
+		localCfg.EnableSocksToHttp = true
 		return
 	}
 	bs, err := ioutil.ReadFile(cfgPath)
@@ -134,7 +141,7 @@ func GetConfig() {
 func StartUI() {
 	//os.Setenv("FYNE_FONT", "d:/NotoSans-Regular.ttf")
 	os.Setenv("FYNE_FONT",  GetFilePathInWd("/libs/SourceHanSansCN-Normal.ttf"))
-	os.Setenv("FYNE_SCALE", "2.5")
+	os.Setenv("FYNE_SCALE", "1.2")
 
 	a := app.New()
 	serversBox := widget.NewVBox()
@@ -149,6 +156,14 @@ func StartUI() {
 	portEntry = widget.NewEntry()
 	portEntry.SetPlaceHolder(localCfg.ClientPort)
 	portEntry.SetText(localCfg.ClientPort)
+
+	portHttpEntry = widget.NewEntry()
+	portHttpEntry.SetPlaceHolder(localCfg.ClientPortHttp)
+	portHttpEntry.SetText(localCfg.ClientPortHttp)
+
+	enableHttpEntry = widget.NewCheck("一般不需要开", switchHttpPortEntry)
+	enableHttpEntry.SetChecked(localCfg.EnableSocksToHttp)
+	switchHttpPortEntry(localCfg.EnableSocksToHttp)
 
 	typeBox := widget.NewVBox()
 	radio := widget.NewRadio([]string{"Trojan", "Shadowsocks"}, func(s string) {
@@ -168,8 +183,13 @@ func StartUI() {
 
 	setForm.Append("本地Socks端口(范围1-65535)", portEntry)
 	setForm.Append("连接类型", typeBox)
+	setForm.Append("是否启用Http代理", enableHttpEntry)
+	setForm.Append("本地Http代理端口(范围1-65535)", portHttpEntry)
 
 	serversBox.Append(setForm)
+
+	hr := widget.NewGroup("服务器列表")
+	serversBox.Append(hr)
 
 	//servers
 	for idx, ss := range cfg.TrojanServers {
@@ -183,7 +203,12 @@ func StartUI() {
 				t = "Trojan"
 			}
 			msgLabel.SetText(fmt.Sprintf("正在连接到 %s 连接类型 %s...", server.NameEn, t))
+			localCfg.ClientPort = portEntry.Text
+			localCfg.ClientPortHttp = portHttpEntry.Text
+			localCfg.EnableSocksToHttp = enableHttpEntry.Checked
 			SaveLocalCfg()
+
+			StopCmd()
 			if localCfg.UseTrojan {
 				ConnectTrojan(server)
 			} else {
@@ -199,7 +224,7 @@ func StartUI() {
 
 
 	spaceBox := canvas.NewRectangle(color.Transparent)
-	spaceBox.SetMinSize(fyne.NewSize(600, 80))
+	spaceBox.SetMinSize(fyne.NewSize(200, 30))
 	serversBox.Append(spaceBox)
 
 	tipLabel := widget.NewLabel("")
@@ -212,7 +237,7 @@ func StartUI() {
 
 
 	w.SetContent(serversBox)
-	w.Resize(fyne.NewSize(600, 400))
+	w.Resize(fyne.NewSize(500, 600))
 	w.CenterOnScreen()
 
 
@@ -224,7 +249,32 @@ func StartUI() {
 	//}()
 
 	w.ShowAndRun()
+	defer a.Quit()
+}
 
+func switchHttpPortEntry(b bool) {
+	if b {
+		portHttpEntry.Enable()
+	} else {
+		portHttpEntry.Disable()
+	}
+}
+/**
+proxy.exe sps -S socks -T tcp -P 127.0.0.1:1006 -t tcp -p :18080
+ */
+func SocksToHttpProxy() {
+	if !localCfg.EnableSocksToHttp {
+		return
+	}
+	//time.Sleep(2 * time.Second)
+	exePath := GetFilePathInWd("/libs/proxy-windows-amd64/goproxy.exe")
+	//start goproxy
+	log.Printf("start goproxy=%s", "")
+	cp := fmt.Sprintf("sps -S socks -T tcp -P 127.0.0.1:%s -t tcp -p :%s", localCfg.ClientPort, localCfg.ClientPortHttp)
+	cmd := exec.Command(exePath, strings.Split(cp, " ")...)
+	HideCmd(cmd)
+	go RunCmd(cmd)
+	//msgLabel.SetText(fmt.Sprintf("已连接到 %s %s, OK!", cfg.NameEn, ""))
 }
 
 /**
@@ -235,12 +285,13 @@ func ConnectShadowsocks(cfg AioCrossTrojanServer) {
 
 	//start shadowsocks
 	log.Printf("start shadowsocks=%s", cfg.Name)
-	StopCmd()
 	cp := fmt.Sprintf("ss://%s:%s@%s:%d", cfg.Method, cfg.PasswordSs, cfg.Host, cfg.PortSs)
-	cmd = exec.Command(exePath, "-c", cp, "-socks", ":" + localCfg.ClientPort)
+	cmd := exec.Command(exePath, "-c", cp, "-socks", ":" + localCfg.ClientPort)
 	HideCmd(cmd)
-	go RunCmd()
+	proxyCmd = cmd
+	go RunCmd(cmd)
 	go RunTestCmd()
+	go SocksToHttpProxy()
 	//msgLabel.SetText(fmt.Sprintf("Connected to %s %s, OK!", cfg.NameEn, cfg.Name))
 	msgLabel.SetText(fmt.Sprintf("已连接到 %s %s, OK!", cfg.NameEn, ""))
 	//RunCmd()
@@ -278,7 +329,6 @@ func ConnectTrojan(cfg AioCrossTrojanServer) {
 	ccPath := GetFilePathInWd(TROJAN_CFG_ROOT_PATH, "/client.json")
 	exePath := GetFilePathInWd(TROJAN_ROOT_PATH, "/trojan.exe")
 
-	localCfg.ClientPort = portEntry.Text
 	cfg.PortClient, err = strconv.Atoi(localCfg.ClientPort)
 	cc := strings.ReplaceAll(string(res.Body()), "CLIENT_PORT", fmt.Sprintf("%d", cfg.PortClient))
 	cc = strings.ReplaceAll(cc, "CERT_DIR", strings.ReplaceAll(trojanCfgPath, "\\", "/") )
@@ -295,11 +345,12 @@ func ConnectTrojan(cfg AioCrossTrojanServer) {
 	}
 	//start trojan
 	log.Printf("start trojan=%s", cfg.Name)
-	StopCmd()
-	cmd = exec.Command(exePath, "-c", ccPath)
+	cmd := exec.Command(exePath, "-c", ccPath)
 	HideCmd(cmd)
-	go RunCmd()
+	proxyCmd = cmd
+	go RunCmd(cmd)
 	go RunTestCmd()
+	go SocksToHttpProxy()
 	//msgLabel.SetText(fmt.Sprintf("Connected to %s %s, OK!", cfg.NameEn, cfg.Name))
 	msgLabel.SetText(fmt.Sprintf("已连接到 %s %s, OK!", cfg.Name, ""))
 	//RunCmd()
@@ -310,12 +361,12 @@ func HideCmd(cmdParam *exec.Cmd) {
 }
 
 func StopCmd() {
-	if cmd != nil && cmd.Process != nil {
+	if proxyCmd != nil && proxyCmd.Process != nil {
 		log.Println("kill process")
-		cmd.Process.Kill()
-		cmd.Wait()
+		proxyCmd.Process.Kill()
+		proxyCmd.Wait()
 		time.Sleep(2 * time.Second)
-		log.Println("kill process done")
+		log.Println("kill proxyCmd done")
 		return
 	}
 
@@ -324,7 +375,7 @@ func StopCmd() {
 		log.Println(err)
 	}
 	for _, proc := range processes {
-		if strings.Contains(proc.Executable(), "trojan") || strings.Contains(proc.Executable(), "shadowsocks2") {
+		if strings.Contains(proc.Executable(), "trojan") || strings.Contains(proc.Executable(), "shadowsocks2") || strings.Contains(proc.Executable(), "goproxy") {
 			exe := "taskkill"
 
 			acmd := exec.Command(exe, "/T",  "/F", "/PID", strconv.Itoa(proc.Pid()))
@@ -335,11 +386,10 @@ func StopCmd() {
 			}
 			acmd.Run()
 			log.Printf("taskkill res=%s", out)
-
-			time.Sleep(2 * time.Second)
-			log.Println("kill process done")
 		}
 	}
+	time.Sleep(2 * time.Second)
+	log.Println("kill process done")
 
 	//if localCfg.LastTrojanPid == 0 {
 	//	return
@@ -353,10 +403,10 @@ func StopCmd() {
 
 }
 
-func RunCmd() {
+func RunCmd(cmdp *exec.Cmd) {
 	log.Println("start process")
-	cmd.Run()
-	defer StopCmd()
+	cmdp.Run()
+	//defer stopcmdp()
 }
 
 func RunTestCmd() {
