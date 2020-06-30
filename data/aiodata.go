@@ -270,10 +270,11 @@ func SocksToHttpProxy() {
 	exePath := GetFilePathInWd("/libs/proxy-windows-amd64/goproxy.exe")
 	//start goproxy
 	log.Printf("start goproxy=%s", "")
-	cp := fmt.Sprintf("sps -S socks -T tcp -P 127.0.0.1:%s -t tcp -p :%s", localCfg.ClientPort, localCfg.ClientPortHttp)
+	cp := fmt.Sprintf("sps --daemon -S socks -T tcp -P 127.0.0.1:%s -t tcp -p :%s", localCfg.ClientPort, localCfg.ClientPortHttp)
 	cmd := exec.Command(exePath, strings.Split(cp, " ")...)
 	HideCmd(cmd)
 	go RunCmd(cmd)
+	go RunTestCmd(true)
 	//msgLabel.SetText(fmt.Sprintf("已连接到 %s %s, OK!", cfg.NameEn, ""))
 }
 
@@ -290,7 +291,7 @@ func ConnectShadowsocks(cfg AioCrossTrojanServer) {
 	HideCmd(cmd)
 	proxyCmd = cmd
 	go RunCmd(cmd)
-	go RunTestCmd()
+	go RunTestCmd(false)
 	go SocksToHttpProxy()
 	//msgLabel.SetText(fmt.Sprintf("Connected to %s %s, OK!", cfg.NameEn, cfg.Name))
 	msgLabel.SetText(fmt.Sprintf("已连接到 %s %s, OK!", cfg.NameEn, ""))
@@ -349,7 +350,7 @@ func ConnectTrojan(cfg AioCrossTrojanServer) {
 	HideCmd(cmd)
 	proxyCmd = cmd
 	go RunCmd(cmd)
-	go RunTestCmd()
+	go RunTestCmd(false)
 	go SocksToHttpProxy()
 	//msgLabel.SetText(fmt.Sprintf("Connected to %s %s, OK!", cfg.NameEn, cfg.Name))
 	msgLabel.SetText(fmt.Sprintf("已连接到 %s %s, OK!", cfg.Name, ""))
@@ -361,14 +362,14 @@ func HideCmd(cmdParam *exec.Cmd) {
 }
 
 func StopCmd() {
-	if proxyCmd != nil && proxyCmd.Process != nil {
-		log.Println("kill process")
-		proxyCmd.Process.Kill()
-		proxyCmd.Wait()
-		time.Sleep(2 * time.Second)
-		log.Println("kill proxyCmd done")
-		return
-	}
+	//if goproxycmd proxyCmd != nil && proxyCmd.Process != nil {
+	//	log.Println("kill process")
+	//	proxyCmd.Process.Kill()
+	//	proxyCmd.Wait()
+	//	time.Sleep(2 * time.Second)
+	//	log.Println("kill proxyCmd done")
+	//	return
+	//}
 
 	processes, err := ps.Processes()
 	if err != nil {
@@ -385,7 +386,8 @@ func StopCmd() {
 				log.Println(err)
 			}
 			acmd.Run()
-			log.Printf("taskkill res=%s", out)
+			xx := string(out)
+			log.Printf("taskkill res=%s", xx)
 		}
 	}
 	time.Sleep(2 * time.Second)
@@ -409,11 +411,15 @@ func RunCmd(cmdp *exec.Cmd) {
 	//defer stopcmdp()
 }
 
-func RunTestCmd() {
+func RunTestCmd(testHttp bool) {
 	time.Sleep(2 * time.Second)
 	//curl --socks5 127.0.0.1:1006 icanhazip.com
 	exe := GetFilePathInWd("/libs/curl.exe")
-	acmd := exec.Command(exe, "--socks5", "127.0.0.1:" + localCfg.ClientPort, "icanhazip.com")
+	ps := strings.Split(fmt.Sprintf("-4 --socks5 127.0.0.1:%s icanhazip.com", localCfg.ClientPort), " ")
+	if testHttp {
+		ps = strings.Split(fmt.Sprintf("-4 -x http://127.0.0.1:%s icanhazip.com", localCfg.ClientPortHttp), " ")
+	}
+	acmd := exec.Command(exe, ps...)
 	HideCmd(acmd)
 	out, err := acmd.Output()
 	if err != nil {
@@ -421,6 +427,11 @@ func RunTestCmd() {
 	}
 	acmd.Run()
 	log.Printf("RunTestCmd res=%s", out)
-	msgLabel.SetText(msgLabel.Text + "\n测试成功,当前IP地址是: " + string(out))
+	if testHttp {
+		msgLabel.SetText(msgLabel.Text + "\n测试http代理成功,当前IP地址是: " + string(out))
+	} else {
+		msgLabel.SetText(msgLabel.Text + "\n测试socks代理成功,当前IP地址是: " + string(out))
+	}
+
 }
 
